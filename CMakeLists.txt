@@ -12,3 +12,6 @@ target_compile_options(parametron_logic PRIVATE -O2 -Wall -Wextra -Wpedantic)
 
 add_executable(parametron_tick src/tick.cpp)
 target_compile_options(parametron_tick PRIVATE -O2 -Wall -Wextra -Wpedantic)
+
+add_executable(phazeride_adc src/adc.cpp)
+target_compile_options(phazeride_adc PRIVATE -O2 -Wall -Wextra -Wno-pedantic)

@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <cmath>
 
+#include "net_tick.h"
+
 using namespace std;
 
 typedef long long ll;
@@ -103,277 +105,63 @@ static void print_usage()
     cout << "  ./parametron_tick --test --maj_delay 1 --not_delay 1\n";
 }
 
-struct node
-{
-    int kind;
-    int delay;
-    vector<int> in;
-    vector<int> pipe;
-    int fixed;
-};
-
-static int out_bit(const vector<node>& ns, int id)
-{
-    return ns[id].pipe[0] & 1;
-}
-
-struct circuit
-{
-    vector<node> ns;
-    int c0;
-    int c1;
-    vector<int> a;
-    vector<int> b;
-    int cin;
-    vector<int> sum;
-    int coutv;
-    vector<int> depth;
-};
-
-static int add_node(circuit& c, int kind, int delay, const vector<int>& in, int fixed)
-{
-    node n;
-    n.kind = kind;
-    n.in = in;
-    n.fixed = fixed;
-
-    if (kind == 2 || kind == 3)
-    {
-        if (delay < 1) delay = 1;
-        n.delay = delay;
-        n.pipe.assign(delay, 0);
-    }
-    else
-    {
-        n.delay = 0;
-        n.pipe.assign(1, fixed & 1);
-    }
-
-    c.ns.push_back(n);
-    return (int)c.ns.size() - 1;
-}
-
-static int make_const(circuit& c, int v)
-{
-    return add_node(c, 0, 0, {}, v);
-}
-
-static int make_input(circuit& c, int v)
-{
-    return add_node(c, 1, 0, {}, v);
-}
-
-static int make_not(circuit& c, int x, int not_delay)
-{
-    return add_node(c, 3, not_delay, {x}, 0);
-}
-
-static int make_maj(circuit& c, int a, int b, int d, int maj_delay)
-{
-    return add_node(c, 2, maj_delay, {a, b, d}, 0);
-}
-
-static int op_and(circuit& c, int a, int b, int maj_delay)
-{
-    return make_maj(c, a, b, c.c0, maj_delay);
-}
-
-static int op_or(circuit& c, int a, int b, int maj_delay)
-{
-    return make_maj(c, a, b, c.c1, maj_delay);
-}
-
-static int op_xor(circuit& c, int a, int b, int maj_delay, int not_delay)
-{
-    int nb = make_not(c, b, not_delay);
-    int na = make_not(c, a, not_delay);
-    int t1 = op_and(c, a, nb, maj_delay);
-    int t2 = op_and(c, na, b, maj_delay);
-    return op_or(c, t1, t2, maj_delay);
-}
-
-static circuit build_adder8(int aval, int bval, int cin, int maj_delay, int not_delay)
-{
-    circuit c;
-    c.ns.clear();
-
-    c.c0 = make_const(c, 0);
-    c.c1 = make_const(c, 1);
-
-    c.a.resize(8);
-    c.b.resize(8);
-    for (int i = 0; i < 8; i++)
-    {
-        c.a[i] = make_input(c, (aval >> i) & 1);
-        c.b[i] = make_input(c, (bval >> i) & 1);
-    }
-    c.cin = make_input(c, cin & 1);
-
-    c.sum.clear();
-    c.sum.reserve(8);
-
-    int carry = c.cin;
-    for (int i = 0; i < 8; i++)
-    {
-        int t = op_xor(c, c.a[i], c.b[i], maj_delay, not_delay);
-        int si = op_xor(c, t, carry, maj_delay, not_delay);
-        int co = make_maj(c, c.a[i], c.b[i], carry, maj_delay);
-        c.sum.push_back(si);
-        carry = co;
-    }
-    c.coutv = carry;
-
-    c.depth.assign((int)c.ns.size(), 0);
-    for (int i = 0; i < (int)c.ns.size(); i++)
-    {
-        int d = 0;
-        for (int j : c.ns[i].in)
-        {
-            d = max(d, c.depth[j]);
-        }
-        c.depth[i] = d + c.ns[i].delay;
-    }
-
-    return c;
-}
-
 struct sim_params
 {
     int ticks;
     double p_flip;
-    int seed;
+    long long seed;
     int trace;
 };
 
-static void step_tick(circuit& c, mt19937_64& rng, double p_flip)
+struct trace_ctx
 {
-    uniform_real_distribution<double> ud(0.0, 1.0);
-    int n = (int)c.ns.size();
-    vector<int> nxt(n, 0);
+    int width;
+};
 
-    for (int i = 0; i < n; i++)
-    {
-        auto& nd = c.ns[i];
-        int res = 0;
-
-        if (nd.kind == 0 || nd.kind == 1)
-        {
-            res = nd.fixed & 1;
-        }
-        else if (nd.kind == 3)
-        {
-            int a = out_bit(c.ns, nd.in[0]);
-            res = a ^ 1;
-
-            if (p_flip > 0.0)
-            {
-                double pe = p_flip;
-                if (ud(rng) < pe) res ^= 1;
-            }
-        }
-        else
-        {
-            int a = out_bit(c.ns, nd.in[0]);
-            int b = out_bit(c.ns, nd.in[1]);
-            int d = out_bit(c.ns, nd.in[2]);
-            int s = a + b + d;
-            res = (s >= 2) ? 1 : 0;
-
-            if (p_flip > 0.0)
-            {
-                int margin = (s == 0 || s == 3) ? 3 : 1;
-                double pe = p_flip / (double)margin;
-                if (pe > 1.0) pe = 1.0;
-                if (ud(rng) < pe) res ^= 1;
-            }
-        }
-
-        nxt[i] = res;
-    }
-
-    for (int i = 0; i < n; i++)
-    {
-        auto& nd = c.ns[i];
-        if (nd.kind == 0 || nd.kind == 1)
-        {
-            nd.pipe[0] = nd.fixed & 1;
-            continue;
-        }
-
-        int d = nd.delay;
-        if (d <= 1)
-        {
-            nd.pipe[0] = nxt[i] & 1;
-        }
-        else
-        {
-            for (int j = 0; j < d - 1; j++)
-            {
-                nd.pipe[j] = nd.pipe[j + 1];
-            }
-            nd.pipe[d - 1] = nxt[i] & 1;
-        }
-    }
-}
-
-static int read_sum8(const circuit& c)
+static void on_trace(void* ctx, int t, ull sum, int coutv)
 {
-    int s = 0;
-    for (int i = 0; i < 8; i++)
-    {
-        int b = out_bit(c.ns, c.sum[i]);
-        s |= (b << i);
-    }
-    return s & 255;
-}
-
-static int critical_ticks(const circuit& c)
-{
-    int d = 0;
-    for (int id : c.sum) d = max(d, c.depth[id]);
-    d = max(d, c.depth[c.coutv]);
-    return d + 2;
+    trace_ctx* tc = (trace_ctx*)ctx;
+    (void)tc;
+    cout << setw(3) << t << " " << bin8((int)(sum & 255ull)) << " " << (coutv & 1) << "\n";
 }
 
 static int run_once(int aval, int bval, int cin, int maj_delay, int not_delay, const sim_params& sp)
 {
-    circuit c = build_adder8(aval & 255, bval & 255, cin & 1, maj_delay, not_delay);
+    net_tick_params p;
+    p.width = 8;
+    p.cin = cin & 1;
+    p.ticks = sp.ticks;
+    p.maj_delay = maj_delay;
+    p.not_delay = not_delay;
+    p.p_flip = sp.p_flip;
 
-    int ticks = sp.ticks;
-    if (ticks <= 0) ticks = critical_ticks(c);
+    ull seed = 0;
+    if (sp.seed >= 0) seed = (ull)sp.seed;
+    else seed = (ull)chrono::high_resolution_clock::now().time_since_epoch().count();
+    p.seed = (long long)seed;
 
-    unsigned long long seed = 0;
-    if (sp.seed >= 0) seed = (unsigned long long)sp.seed;
-    else seed = (unsigned long long)chrono::high_resolution_clock::now().time_since_epoch().count();
+    int crit = net_tick_crit_ticks(8, maj_delay, not_delay);
+    int ticks = p.ticks;
+    if (ticks <= 0) ticks = crit;
 
-    mt19937_64 rng(seed);
+    trace_ctx tc;
+    tc.width = 8;
+    net_tick_trace_fn cb = nullptr;
 
     if (sp.trace != 0)
     {
         cout << "seed=" << seed << " ticks=" << ticks
              << " maj_delay=" << maj_delay << " not_delay=" << not_delay
              << " p_flip=" << fixed << setprecision(6) << sp.p_flip
-             << " crit=" << critical_ticks(c)
+             << " crit=" << crit
              << "\n";
         cout << "t sum cout\n";
+        cb = on_trace;
     }
 
-    for (int t = 0; t <= ticks; t++)
-    {
-        int sum = read_sum8(c);
-        int coutv = out_bit(c.ns, c.coutv);
-
-        if (sp.trace != 0)
-        {
-            cout << setw(3) << t << " " << bin8(sum) << " " << coutv << "\n";
-        }
-
-        if (t == ticks) break;
-        step_tick(c, rng, sp.p_flip);
-    }
-
-    int sum = read_sum8(c);
-    int coutv = out_bit(c.ns, c.coutv);
+    net_tick_result rr = net_tick_add((ull)(aval & 255), (ull)(bval & 255), p, cb, &tc);
+    int sum = (int)(rr.sum & 255ull);
+    int coutv = rr.carry & 1;
 
     int ref = (aval & 255) + (bval & 255) + (cin & 1);
     int ref_sum = ref & 255;
@@ -401,14 +189,19 @@ int main(int argc, char** argv)
     int not_delay = 1;
     int ticks = 0;
     double p_flip = 0.0;
-    int seed = -1;
+    long long seed = -1;
     int trace = 1;
 
     if (args.count("maj_delay") && parse_int(args["maj_delay"], maj_delay) != 0) { print_usage(); return ERR_USAGE; }
     if (args.count("not_delay") && parse_int(args["not_delay"], not_delay) != 0) { print_usage(); return ERR_USAGE; }
     if (args.count("ticks") && parse_int(args["ticks"], ticks) != 0) { print_usage(); return ERR_USAGE; }
     if (args.count("p_flip") && parse_double(args["p_flip"], p_flip) != 0) { print_usage(); return ERR_USAGE; }
-    if (args.count("seed") && parse_int(args["seed"], seed) != 0) { print_usage(); return ERR_USAGE; }
+    if (args.count("seed"))
+    {
+        int tmp = 0;
+        if (parse_int(args["seed"], tmp) != 0) { print_usage(); return ERR_USAGE; }
+        seed = (long long)tmp;
+    }
     if (args.count("trace") && parse_int(args["trace"], trace) != 0) { print_usage(); return ERR_USAGE; }
 
     if (maj_delay < 0 || not_delay < 0 || ticks < 0 || p_flip < 0.0)

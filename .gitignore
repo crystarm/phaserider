@@ -1,1 +1,9 @@
+
+
+
 build/
+
+*.patch
+
+docs/summary.txt
+docs/notes.txt

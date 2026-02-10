@@ -129,11 +129,13 @@ static void print_usage()
     cout << "  --alpha_ratio X      (default 1.0)\n";
     cout << "  --det_tau SECONDS    (default 0.010)\n";
     cout << "  --noise X            (default 0.0)\n";
-    cout << "  --seed N             (default -1 time-based)\n\n";
+    cout << "  --seed N             (default: run=-1 time-based, sweep=1+idx)\n\n";
 
     cout << "coupling:\n";
-    cout << "  --k12 X              (default 0.0)\n";
-    cout << "  --k21 X              (default 0.0)\n";
+    cout << "  --k21 X              (default 0.0) 1->2\n";
+    cout << "  --k12 X              (default 0.0) 2->1\n";
+    cout << "  --k_1to2 X           (alias for k21)\n";
+    cout << "  --k_2to1 X           (alias for k12)\n";
     cout << "  --k X                (sets both k12 and k21)\n";
     cout << "  --handoff_t SEC      (default -1 disabled)\n";
     cout << "  --k12_off X          (default 0.0) effective k12 after handoff\n";
@@ -158,7 +160,7 @@ static void print_usage()
     cout << "  --amp_min X          (default 1e-3)\n\n";
 
     cout << "examples:\n";
-    cout << "  ./parametron_ode --mode run --k 0.08 --handoff_t 0.05 --k12_off 0 --k21_off 0 --kick_amp2 0 --kick_dur2 0\n";
+    cout << "  ./parametron_ode --mode run --k_1to2 0.08 --k_2to1 0 --handoff_t 0.05 --k21_off 0 --k12_off 0 --kick_amp2 0 --kick_dur2 0\n";
     cout << "  ./parametron_ode --mode sweep --k 0.05 --h_from 0.2 --h_to 1.1 --h_step 0.02\n";
 }
 
@@ -414,6 +416,7 @@ static sim_result run_sim(const params& p_in, bool emit)
                      << " amp2=" << scientific << setprecision(3) << amp2
                      << " bit2=" << bit2
                      << " k12_eff=" << fixed << setprecision(4) << k12_eff
+                     << " k21_eff=" << fixed << setprecision(4) << k21_eff
                      << "\n";
             }
         }
@@ -448,6 +451,8 @@ static int main_sweep(params p)
 
     cout << "h,bit1_k0,amp1_k0,bit2_k0,amp2_k0,ok_k0,bit1_k1,amp1_k1,bit2_k1,amp2_k1,ok_k1,bistable1,bistable2\n";
 
+    int base_seed = (p.seed >= 0) ? p.seed : 1;
+
     int n = (int)floor((p.h_to - p.h_from) / p.h_step + 0.5) + 1;
     if (n < 1) n = 1;
 
@@ -463,6 +468,10 @@ static int main_sweep(params p)
 
         p0.kick_bit1 = 0;
         p1.kick_bit1 = 1;
+
+        int cur_seed = base_seed + idx;
+        p0.seed = cur_seed;
+        p1.seed = cur_seed;
 
         auto r0 = run_sim(p0, false);
         auto r1 = run_sim(p1, false);
@@ -518,6 +527,20 @@ int main(int argc, char** argv)
         p.k12 = k;
         p.k21 = k;
     }
+
+    if (args.count("k_1to2"))
+    {
+        double k = 0.0;
+        if (parse_double(args["k_1to2"], k) != 0) { print_usage(); return ERR_USAGE; }
+        p.k21 = k;
+    }
+    if (args.count("k_2to1"))
+    {
+        double k = 0.0;
+        if (parse_double(args["k_2to1"], k) != 0) { print_usage(); return ERR_USAGE; }
+        p.k12 = k;
+    }
+
     if (args.count("k12") && parse_double(args["k12"], p.k12) != 0) { print_usage(); return ERR_USAGE; }
     if (args.count("k21") && parse_double(args["k21"], p.k21) != 0) { print_usage(); return ERR_USAGE; }
 

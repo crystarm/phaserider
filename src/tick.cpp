@@ -7,7 +7,7 @@
 #include <iomanip>
 #include <cmath>
 
-#include "net_tick.h"
+#include "circuit_tick.h"
 
 using namespace std;
 
@@ -84,6 +84,18 @@ static string bin8(int x)
     return s;
 }
 
+static string carry_chain9(ull carry_pack, int coutv)
+{
+    string s;
+    s.reserve(9);
+    s.push_back((coutv & 1) ? '1' : '0');
+    for (int i = 7; i >= 0; i--)
+    {
+        s.push_back(((carry_pack >> i) & 1ull) ? '1' : '0');
+    }
+    return s;
+}
+
 static void print_usage()
 {
     cout << "usage:\n";
@@ -118,16 +130,16 @@ struct trace_ctx
     int width;
 };
 
-static void on_trace(void* ctx, int t, ull sum, int coutv)
+static void on_trace(void* ctx, int t, ull sum, ull carry_pack, int coutv)
 {
     trace_ctx* tc = (trace_ctx*)ctx;
     (void)tc;
-    cout << setw(3) << t << " " << bin8((int)(sum & 255ull)) << " " << (coutv & 1) << "\n";
+    cout << setw(3) << t << " " << bin8((int)(sum & 255ull)) << " " << carry_chain9(carry_pack, coutv) << " " << (coutv & 1) << "\n";
 }
 
 static int run_once(int aval, int bval, int cin, int maj_delay, int not_delay, const sim_params& sp)
 {
-    net_tick_params p;
+    circuit_tick_params p;
     p.width = 8;
     p.cin = cin & 1;
     p.ticks = sp.ticks;
@@ -140,13 +152,13 @@ static int run_once(int aval, int bval, int cin, int maj_delay, int not_delay, c
     else seed = (ull)chrono::high_resolution_clock::now().time_since_epoch().count();
     p.seed = (long long)seed;
 
-    int crit = net_tick_crit_ticks(8, maj_delay, not_delay);
+    int crit = circuit_tick_crit_ticks(8, maj_delay, not_delay);
     int ticks = p.ticks;
     if (ticks <= 0) ticks = crit;
 
     trace_ctx tc;
     tc.width = 8;
-    net_tick_trace_fn cb = nullptr;
+    circuit_tick_trace_fn cb = nullptr;
 
     if (sp.trace != 0)
     {
@@ -155,11 +167,11 @@ static int run_once(int aval, int bval, int cin, int maj_delay, int not_delay, c
              << " p_flip=" << fixed << setprecision(6) << sp.p_flip
              << " crit=" << crit
              << "\n";
-        cout << "t sum cout\n";
+        cout << "t sum carry cout\n";
         cb = on_trace;
     }
 
-    net_tick_result rr = net_tick_add((ull)(aval & 255), (ull)(bval & 255), p, cb, &tc);
+    circuit_tick_result rr = circuit_tick_add((ull)(aval & 255), (ull)(bval & 255), p, cb, &tc);
     int sum = (int)(rr.sum & 255ull);
     int coutv = rr.carry & 1;
 

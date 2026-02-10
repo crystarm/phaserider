@@ -9,7 +9,7 @@
 #include <limits>
 #include <algorithm>
 
-#include "net_tick.h"
+#include "circuit_tick.h"
 
 using namespace std;
 
@@ -299,15 +299,16 @@ struct tick_trace_ctx
     int width;
 };
 
-static void on_tick_trace(void* ctx, int t, ull sum, int coutv)
+static void on_tick_trace(void* ctx, int t, ull sum, ull carry_pack, int coutv)
 {
     tick_trace_ctx* tc = (tick_trace_ctx*)ctx;
+    (void)carry_pack;
     cout << setw(3) << t << " " << bin_n(sum, tc->width) << " " << (coutv & 1) << "\n";
 }
 
 static add_out add_tick(ull a, ull b, int cin, int width, const tick_params& tp)
 {
-    net_tick_params p;
+    circuit_tick_params p;
     p.width = width;
     p.cin = cin & 1;
     p.ticks = tp.ticks;
@@ -320,14 +321,14 @@ static add_out add_tick(ull a, ull b, int cin, int width, const tick_params& tp)
     else seed = (ull)chrono::high_resolution_clock::now().time_since_epoch().count();
     p.seed = (long long)seed;
 
-    int crit = net_tick_crit_ticks(width, tp.maj_delay, tp.not_delay);
+    int crit = circuit_tick_crit_ticks(width, tp.maj_delay, tp.not_delay);
     int ticks = p.ticks;
     if (ticks <= 0) ticks = crit;
 
     tick_trace_ctx tc;
     tc.width = width;
 
-    net_tick_trace_fn cb = nullptr;
+    circuit_tick_trace_fn cb = nullptr;
     if (tp.trace != 0)
     {
         cout << "seed=" << seed << " ticks=" << ticks
@@ -338,7 +339,7 @@ static add_out add_tick(ull a, ull b, int cin, int width, const tick_params& tp)
         cb = on_tick_trace;
     }
 
-    net_tick_result rr = net_tick_add(a, b, p, cb, &tc);
+    circuit_tick_result rr = circuit_tick_add(a, b, p, cb, &tc);
 
     add_out o;
     o.sum = rr.sum & mask_for_width(width);

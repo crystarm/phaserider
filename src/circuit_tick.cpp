@@ -1,4 +1,4 @@
-#include "net_tick.h"
+#include "circuit_tick.h"
 
 #include <vector>
 #include <random>
@@ -36,6 +36,7 @@ struct circuit
     vector<int> b;
     int cin;
     vector<int> sum;
+    vector<int> carry_in;
     int coutv;
     vector<int> depth;
     int width;
@@ -123,10 +124,13 @@ static circuit build_adder(int width, ull aval, ull bval, int cin, int maj_delay
 
     c.sum.clear();
     c.sum.reserve(width);
+    c.carry_in.clear();
+    c.carry_in.reserve(width);
 
     int carry = c.cin;
     for (int i = 0; i < width; i++)
     {
+        c.carry_in.push_back(carry);
         int t = op_xor(c, c.a[i], c.b[i], maj_delay, not_delay);
         int si = op_xor(c, t, carry, maj_delay, not_delay);
         int co = make_maj(c, c.a[i], c.b[i], carry, maj_delay);
@@ -230,6 +234,17 @@ static ull read_sum(const circuit& c)
     return s & mask_for_width(c.width);
 }
 
+static ull read_carry_pack(const circuit& c)
+{
+    ull x = 0;
+    for (int i = 0; i < c.width; i++)
+    {
+        int b = out_bit(c.ns, c.carry_in[i]);
+        x |= (ull)b << i;
+    }
+    return x & mask_for_width(c.width);
+}
+
 static int critical_ticks(const circuit& c)
 {
     int d = 0;
@@ -238,7 +253,7 @@ static int critical_ticks(const circuit& c)
     return d + 2;
 }
 
-int net_tick_crit_ticks(int width, int maj_delay, int not_delay)
+int circuit_tick_crit_ticks(int width, int maj_delay, int not_delay)
 {
     if (width < 1) width = 1;
     if (width > 64) width = 64;
@@ -249,9 +264,9 @@ int net_tick_crit_ticks(int width, int maj_delay, int not_delay)
     return critical_ticks(c);
 }
 
-net_tick_result net_tick_add(ull a, ull b, const net_tick_params& p, net_tick_trace_fn trace, void* trace_ctx)
+circuit_tick_result circuit_tick_add(ull a, ull b, const circuit_tick_params& p, circuit_tick_trace_fn trace, void* trace_ctx)
 {
-    net_tick_result r;
+    circuit_tick_result r;
     r.sum = 0;
     r.carry = 0;
     r.used_seed = 0;
@@ -286,8 +301,9 @@ net_tick_result net_tick_add(ull a, ull b, const net_tick_params& p, net_tick_tr
     for (int t = 0; t <= ticks; t++)
     {
         ull sum = read_sum(c);
+        ull carry_pack = read_carry_pack(c);
         int coutv = out_bit(c.ns, c.coutv);
-        if (trace) trace(trace_ctx, t, sum, coutv);
+        if (trace) trace(trace_ctx, t, sum, carry_pack, coutv);
         if (t == ticks) break;
         step_tick(c, rng, p.p_flip);
     }

@@ -35,6 +35,8 @@ struct params
     int kick_bit2;
     double kick_amp1;
     double kick_amp2;
+    double kick_phase1;
+    double kick_phase2;
     double kick_dur1;
     double kick_dur2;
 
@@ -118,6 +120,7 @@ static void print_usage()
 {
     cout << "usage:\n";
     cout << "  ./parametron_ode --mode run [options]\n";
+    cout << "  ./parametron_ode --mode wave [options]\n";
     cout << "  ./parametron_ode --mode sweep [options]\n\n";
 
     cout << "common:\n";
@@ -146,12 +149,18 @@ static void print_usage()
     cout << "  --kick_bit2 0|1      (default 1)\n";
     cout << "  --kick_amp1 X        (default 0.20)\n";
     cout << "  --kick_amp2 X        (default 0.00)\n";
+    cout << "  --kick_phase1 RAD    (default 0.0) phase shift for kick1 (cos(wt+phase))\n";
+    cout << "  --kick_phase2 RAD    (default 0.0) phase shift for kick2 (cos(wt+phase))\n";
     cout << "  --kick_dur1 SEC      (default 0.005)\n";
     cout << "  --kick_dur2 SEC      (default 0.000)\n\n";
 
     cout << "run output:\n";
     cout << "  --out_every N        (default 10)\n";
     cout << "  --csv 0|1            (default 1)\n\n";
+
+    cout << "wave mode (raw sinusoids):\n";
+    cout << "  prints x/v + pump + drive + total u per step (decimated by out_every).\n";
+    cout << "  hint: --csv 1 and pipe to gnuplot or python for plots.\n\n";
 
     cout << "sweep:\n";
     cout << "  --h_from X           (default 0.0)\n";
@@ -161,6 +170,7 @@ static void print_usage()
 
     cout << "examples:\n";
     cout << "  ./parametron_ode --mode run --k_1to2 0.08 --k_2to1 0 --handoff_t 0.05 --k21_off 0 --k12_off 0 --kick_amp2 0 --kick_dur2 0\n";
+    cout << "  ./parametron_ode --mode wave --t 0.001 --dt 1e-6 --out_every 1 --csv 1 > wave.csv\n";
     cout << "  ./parametron_ode --mode sweep --k 0.05 --h_from 0.2 --h_to 1.1 --h_step 0.02\n";
 }
 
@@ -186,6 +196,8 @@ static params default_params()
     p.kick_bit2 = 1;
     p.kick_amp1 = 0.20;
     p.kick_amp2 = 0.00;
+    p.kick_phase1 = 0.0;
+    p.kick_phase2 = 0.0;
     p.kick_dur1 = 0.005;
     p.kick_dur2 = 0.000;
 
@@ -217,6 +229,22 @@ struct deriv_out
     double dv2;
 };
 
+struct inputs_out
+{
+    double pump;
+    double refc;
+    double refs;
+
+    double k12_eff;
+    double k21_eff;
+
+    double drive1;
+    double drive2;
+
+    double u1;
+    double u2;
+};
+
 static void get_eff_k(const params& p, double t, double& k12_eff, double& k21_eff)
 {
     k12_eff = p.k12;
@@ -228,32 +256,48 @@ static void get_eff_k(const params& p, double t, double& k12_eff, double& k21_ef
     }
 }
 
-static deriv_out f_deriv(double t, double x1, double v1, double x2, double v2, const params& p, double w0)
+static inputs_out compute_inputs(double t, double x1, double x2, const params& p, double w0)
 {
     double pump = cos(2.0 * w0 * t);
-    double alpha = p.alpha_ratio * (w0 * w0);
-
-    double u1 = 0.0;
-    double u2 = 0.0;
-
-    if (t < p.kick_dur1)
-    {
-        double s = (p.kick_bit1 != 0) ? +1.0 : -1.0;
-        u1 += s * p.kick_amp1 * cos(w0 * t);
-    }
-
-    if (t < p.kick_dur2)
-    {
-        double s = (p.kick_bit2 != 0) ? +1.0 : -1.0;
-        u2 += s * p.kick_amp2 * cos(w0 * t);
-    }
+    double refc = cos(w0 * t);
+    double refs = sin(w0 * t);
 
     double k12_eff = 0.0;
     double k21_eff = 0.0;
     get_eff_k(p, t, k12_eff, k21_eff);
 
+    double drive1 = 0.0;
+    double drive2 = 0.0;
+    if (t < p.kick_dur1)
+    {
+        double s = (p.kick_bit1 != 0) ? +1.0 : -1.0;
+        drive1 = s * p.kick_amp1 * cos(w0 * t + p.kick_phase1);
+    }
+    if (t < p.kick_dur2)
+    {
+        double s = (p.kick_bit2 != 0) ? +1.0 : -1.0;
+        drive2 = s * p.kick_amp2 * cos(w0 * t + p.kick_phase2);
+    }
+
+    double u1 = 0.0;
+    double u2 = 0.0;
+    u1 += drive1;
+    u2 += drive2;
+
     u1 += k12_eff * x2;
     u2 += k21_eff * x1;
+
+    return inputs_out{pump, refc, refs, k12_eff, k21_eff, drive1, drive2, u1, u2};
+}
+
+static deriv_out f_deriv(double t, double x1, double v1, double x2, double v2, const params& p, double w0)
+{
+    auto io = compute_inputs(t, x1, x2, p, w0);
+    double pump = io.pump;
+    double alpha = p.alpha_ratio * (w0 * w0);
+
+    double u1 = io.u1;
+    double u2 = io.u2;
 
     double dx1 = v1;
     double dv1 = -2.0 * p.zeta * w0 * v1
@@ -344,6 +388,8 @@ static sim_result run_sim(const params& p_in, bool emit)
     ll steps = (ll)llround(p.t_end / p.dt);
     if (steps < 1) steps = 1;
 
+    bool wave = (p.mode == "wave");
+
     if (emit)
     {
         double spp = 1.0 / (p.f0 * p.dt);
@@ -354,7 +400,14 @@ static sim_result run_sim(const params& p_in, bool emit)
 
         if (p.csv != 0)
         {
-            cout << "t,x1,v1,x2,v2,pump,refc,refs,k12_eff,k21_eff,i1,q1,amp1,phase1,bit1,i2,q2,amp2,phase2,bit2\n";
+            if (wave)
+            {
+                cout << "t,x1,v1,x2,v2,pump,refc,refs,drive1,drive2,u1,u2,k12_eff,k21_eff,i1,q1,amp1,phase1,bit1,i2,q2,amp2,phase2,bit2\n";
+            }
+            else
+            {
+                cout << "t,x1,v1,x2,v2,pump,refc,refs,k12_eff,k21_eff,i1,q1,amp1,phase1,bit1,i2,q2,amp2,phase2,bit2\n";
+            }
         }
         else
         {
@@ -364,6 +417,10 @@ static sim_result run_sim(const params& p_in, bool emit)
                  << " handoff_t=" << p.handoff_t
                  << " k12_off=" << p.k12_off << " k21_off=" << p.k21_off
                  << "\n";
+            if (wave)
+            {
+                cout << "mode=wave (raw) out_every=" << p.out_every << "\n";
+            }
         }
     }
 
@@ -372,9 +429,10 @@ static sim_result run_sim(const params& p_in, bool emit)
     {
         double t = (double)k * p.dt;
 
-        double pump = cos(2.0 * w0 * t);
-        double refc = cos(w0 * t);
-        double refs = sin(w0 * t);
+        auto io = compute_inputs(t, x1, x2, p, w0);
+        double pump = io.pump;
+        double refc = io.refc;
+        double refs = io.refs;
 
         i1 = (1.0 - beta) * i1 + beta * (x1 * refc);
         q1 = (1.0 - beta) * q1 + beta * (x1 * refs);
@@ -394,30 +452,60 @@ static sim_result run_sim(const params& p_in, bool emit)
 
         if (emit && (k % p.out_every == 0 || k == steps))
         {
-            double k12_eff = 0.0;
-            double k21_eff = 0.0;
-            get_eff_k(p, t, k12_eff, k21_eff);
+            double k12_eff = io.k12_eff;
+            double k21_eff = io.k21_eff;
 
             if (p.csv != 0)
             {
-                cout << setprecision(10)
-                     << t << "," << x1 << "," << v1 << "," << x2 << "," << v2 << ","
-                     << pump << "," << refc << "," << refs << ","
-                     << k12_eff << "," << k21_eff << ","
-                     << i1 << "," << q1 << "," << amp1 << "," << phase1 << "," << bit1 << ","
-                     << i2 << "," << q2 << "," << amp2 << "," << phase2 << "," << bit2
-                     << "\n";
+                if (wave)
+                {
+                    cout << setprecision(10)
+                         << t << "," << x1 << "," << v1 << "," << x2 << "," << v2 << ","
+                         << pump << "," << refc << "," << refs << ","
+                         << io.drive1 << "," << io.drive2 << "," << io.u1 << "," << io.u2 << ","
+                         << k12_eff << "," << k21_eff << ","
+                         << i1 << "," << q1 << "," << amp1 << "," << phase1 << "," << bit1 << ","
+                         << i2 << "," << q2 << "," << amp2 << "," << phase2 << "," << bit2
+                         << "\n";
+                }
+                else
+                {
+                    cout << setprecision(10)
+                         << t << "," << x1 << "," << v1 << "," << x2 << "," << v2 << ","
+                         << pump << "," << refc << "," << refs << ","
+                         << k12_eff << "," << k21_eff << ","
+                         << i1 << "," << q1 << "," << amp1 << "," << phase1 << "," << bit1 << ","
+                         << i2 << "," << q2 << "," << amp2 << "," << phase2 << "," << bit2
+                         << "\n";
+                }
             }
             else
             {
-                cout << "t=" << fixed << setprecision(6) << t
-                     << " amp1=" << scientific << setprecision(3) << amp1
-                     << " bit1=" << bit1
-                     << " amp2=" << scientific << setprecision(3) << amp2
-                     << " bit2=" << bit2
-                     << " k12_eff=" << fixed << setprecision(4) << k12_eff
-                     << " k21_eff=" << fixed << setprecision(4) << k21_eff
-                     << "\n";
+                if (wave)
+                {
+                    cout << "t=" << fixed << setprecision(6) << t
+                         << " x1=" << scientific << setprecision(6) << x1
+                         << " x2=" << scientific << setprecision(6) << x2
+                         << " pump=" << fixed << setprecision(6) << pump
+                         << " drive1=" << scientific << setprecision(3) << io.drive1
+                         << " u1=" << scientific << setprecision(3) << io.u1
+                         << " drive2=" << scientific << setprecision(3) << io.drive2
+                         << " u2=" << scientific << setprecision(3) << io.u2
+                         << " bit1=" << bit1
+                         << " bit2=" << bit2
+                         << "\n";
+                }
+                else
+                {
+                    cout << "t=" << fixed << setprecision(6) << t
+                         << " amp1=" << scientific << setprecision(3) << amp1
+                         << " bit1=" << bit1
+                         << " amp2=" << scientific << setprecision(3) << amp2
+                         << " bit2=" << bit2
+                         << " k12_eff=" << fixed << setprecision(4) << k12_eff
+                         << " k21_eff=" << fixed << setprecision(4) << k21_eff
+                         << "\n";
+                }
             }
         }
 
@@ -517,6 +605,8 @@ int main(int argc, char** argv)
     if (args.count("kick_bit2") && parse_int(args["kick_bit2"], p.kick_bit2) != 0) { print_usage(); return ERR_USAGE; }
     if (args.count("kick_amp1") && parse_double(args["kick_amp1"], p.kick_amp1) != 0) { print_usage(); return ERR_USAGE; }
     if (args.count("kick_amp2") && parse_double(args["kick_amp2"], p.kick_amp2) != 0) { print_usage(); return ERR_USAGE; }
+    if (args.count("kick_phase1") && parse_double(args["kick_phase1"], p.kick_phase1) != 0) { print_usage(); return ERR_USAGE; }
+    if (args.count("kick_phase2") && parse_double(args["kick_phase2"], p.kick_phase2) != 0) { print_usage(); return ERR_USAGE; }
     if (args.count("kick_dur1") && parse_double(args["kick_dur1"], p.kick_dur1) != 0) { print_usage(); return ERR_USAGE; }
     if (args.count("kick_dur2") && parse_double(args["kick_dur2"], p.kick_dur2) != 0) { print_usage(); return ERR_USAGE; }
 
@@ -565,7 +655,7 @@ int main(int argc, char** argv)
         return ERR_USAGE;
     }
 
-    if (p.mode == "run")
+    if (p.mode == "run" || p.mode == "wave")
     {
         return main_run(p);
     }

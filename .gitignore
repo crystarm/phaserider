@@ -7,3 +7,7 @@ build/
 
 docs/summary.txt
 docs/notes.txt
+
+
+
+*.csv

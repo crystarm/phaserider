@@ -303,7 +303,10 @@ static void on_tick_trace(void* ctx, int t, ull sum, ull carry_pack, int coutv)
 {
     tick_trace_ctx* tc = (tick_trace_ctx*)ctx;
     (void)carry_pack;
-    cout << setw(3) << t << " " << bin_n(sum, tc->width) << " " << (coutv & 1) << "\n";
+    cout << setw(4) << t
+         << setw(tc->width + 2) << bin_n(sum, tc->width)
+         << setw(5) << (coutv & 1)
+         << "\n";
 }
 
 static add_out add_tick(ull a, ull b, int cin, int width, const tick_params& tp)
@@ -335,7 +338,10 @@ static add_out add_tick(ull a, ull b, int cin, int width, const tick_params& tp)
              << " maj_delay=" << tp.maj_delay << " not_delay=" << tp.not_delay
              << " p_flip=" << fixed << setprecision(6) << tp.p_flip
              << " crit=" << crit << "\n";
-        cout << "t sum cout\n";
+        cout << setw(4) << "t"
+             << setw(width + 2) << "sum"
+             << setw(5) << "cout"
+             << "\n";
         cb = on_tick_trace;
     }
 

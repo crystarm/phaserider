@@ -134,7 +134,11 @@ static void on_trace(void* ctx, int t, ull sum, ull carry_pack, int coutv)
 {
     trace_ctx* tc = (trace_ctx*)ctx;
     (void)tc;
-    cout << setw(3) << t << " " << bin8((int)(sum & 255ull)) << " " << carry_chain9(carry_pack, coutv) << " " << (coutv & 1) << "\n";
+    cout << setw(4) << t
+         << setw(10) << bin8((int)(sum & 255ull))
+         << setw(12) << carry_chain9(carry_pack, coutv)
+         << setw(5) << (coutv & 1)
+         << "\n";
 }
 
 static int run_once(int aval, int bval, int cin, int maj_delay, int not_delay, const sim_params& sp)
@@ -167,7 +171,11 @@ static int run_once(int aval, int bval, int cin, int maj_delay, int not_delay, c
              << " p_flip=" << fixed << setprecision(6) << sp.p_flip
              << " crit=" << crit
              << "\n";
-        cout << "t sum carry cout\n";
+             cout << setw(4) << "t"
+                  << setw(10) << "sum"
+                  << setw(12) << "carry"
+                  << setw(5) << "cout"
+                  << "\n";
         cb = on_trace;
     }
 

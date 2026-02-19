@@ -2,13 +2,14 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cli="$root/cli.sh"
 build_dir="$root/build"
 adc_bin="$build_dir/phazeride_adc"
 
 widths=(1 2 3 4 5 6 7 8 9 10 12 16 24 32 48 64)
 rand_cases=5000
 seed=123456789
+width8_progress_step=32
+progress_step=200
 
 usage() {
   echo "Usage: $0 [--rand N] [--seed N] [--widths \"1 2 4 8 16 32 64\"]"
@@ -40,13 +41,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -x "$cli" ]]; then
-  echo "cli.sh not found or not executable: $cli" >&2
-  exit 2
-fi
-
-# Build using cli.sh (interactive script, but we can feed commands)
-printf "build\nexit\n" | "$cli" >/dev/null
+# Build using CMake
+mkdir -p "$build_dir"
+cmake -S "$root" -B "$build_dir" >/dev/null
+cmake --build "$build_dir" -j >/dev/null
 
 if [[ ! -x "$adc_bin" ]]; then
   echo "Missing phazeride_adc after build" >&2
@@ -100,14 +98,18 @@ CREF
 
 cc -std=c11 -O2 "$tmpdir/c_ref.c" -o "$c_ref"
 
-# Helper to run adc via cli.sh and extract sum + flags
+# Helper to run adc directly and extract sum + flags
 run_adc() {
   local width="$1" a="$2" b="$3" cin="$4"
 
-  # Use cli interactive commands, force deterministic tick
   local out
-  out="$(printf "width %s\nmodel tick\nfmt hex\nsigned 1\np_flip 0.0\nseed 1\ncompare off\njson 0\nadd %s %s %s\nexit\n" \
-    "$width" "$a" "$b" "$cin" | "$cli")"
+  out="$("$adc_bin" \
+    --a "$a" --b "$b" --cin "$cin" \
+    --width "$width" --model tick \
+    --fmt hex --signed 1 \
+    --maj_delay 1 --not_delay 1 --ticks 0 \
+    --p_flip 0.0 --seed 1 --trace 0 \
+  )"
 
   local sum_hex
   local flags
@@ -161,6 +163,9 @@ rand64() {
 
 echo "Running exhaustive width=8..."
 for a in $(seq -128 127); do
+  if (( ((a + 128) % width8_progress_step) == 0 )); then
+    echo "progress width=8 a=$a"
+  fi
   for b in $(seq -128 127); do
     for cin in 0 1; do
       check_case 8 "$a" "$b" "$cin" || exit 1
@@ -174,6 +179,11 @@ for width in "${widths[@]}"; do
   if [[ "$width" -eq 8 ]]; then
     continue
   fi
+
+  step=$progress_step
+  if (( step < 1 )); then step=1; fi
+  if (( step > rand_cases )); then step=$rand_cases; fi
+
   for ((i=0; i<rand_cases; i++)); do
     r1="$(rand64)"
     r2="$(rand64)"
@@ -195,6 +205,9 @@ for width in "${widths[@]}"; do
     cin=$(( r3 & 1 ))
 
     check_case "$width" "$a" "$b" "$cin" || exit 1
+    if (( (i + 1) % step == 0 )); then
+      echo "progress width=$width $((i + 1))/$rand_cases"
+    fi
   done
   echo "OK width=$width random=$rand_cases"
 done

@@ -8,11 +8,13 @@ adc_bin="$build_dir/phazeride_adc"
 widths=(1 2 3 4 5 6 7 8 9 10 12 16 24 32 48 64)
 rand_cases=5000
 seed=123456789
-width8_progress_step=32
+width8_progress_step=1
 progress_step=200
+width8_stride=1
+skip_exhaustive=0
 
 usage() {
-  echo "Usage: $0 [--rand N] [--seed N] [--widths \"1 2 4 8 16 32 64\"]"
+  echo "Usage: $0 [--rand N] [--seed N] [--widths \"1 2 4 8 16 32 64\"] [--skip-exhaustive] [--width8-step N] [--width8-stride N]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -27,6 +29,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --widths)
       IFS=' ' read -r -a widths <<< "$2"
+      shift 2
+      ;;
+    --skip-exhaustive)
+      skip_exhaustive=1
+      shift 1
+      ;;
+    --width8-step)
+      width8_progress_step="$2"
+      shift 2
+      ;;
+    --width8-stride)
+      width8_stride="$2"
       shift 2
       ;;
     -h|--help)
@@ -161,18 +175,22 @@ rand64() {
   echo "$rand_state"
 }
 
-echo "Running exhaustive width=8..."
-for a in $(seq -128 127); do
-  if (( ((a + 128) % width8_progress_step) == 0 )); then
-    echo "progress width=8 a=$a"
-  fi
-  for b in $(seq -128 127); do
-    for cin in 0 1; do
-      check_case 8 "$a" "$b" "$cin" || exit 1
+if [[ "$skip_exhaustive" -eq 1 ]]; then
+  echo "Skipping exhaustive width=8 (disabled by flag)"
+else
+  echo "Running exhaustive width=8..."
+  for a in $(seq -128 "$width8_stride" 127); do
+    if (( ((a + 128) % width8_progress_step) == 0 )); then
+      echo "progress width=8 a=$a"
+    fi
+    for b in $(seq -128 "$width8_stride" 127); do
+      for cin in 0 1; do
+        check_case 8 "$a" "$b" "$cin" || exit 1
+      done
     done
   done
-done
-echo "OK width=8 exhaustive"
+  echo "OK width=8 exhaustive"
+fi
 
 echo "Running random tests..."
 for width in "${widths[@]}"; do

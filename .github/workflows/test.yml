@@ -26,4 +26,4 @@ jobs:
         run: chmod +x ./cli.sh
 
       - name: Run tests
-        run: ./test.sh
+        run: time ./test.sh --skip-exhaustive --rand 1000

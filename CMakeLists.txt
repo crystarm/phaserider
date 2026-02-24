@@ -16,6 +16,17 @@ target_compile_options(parametron_tick PRIVATE -O2 -Wall -Wextra -Wpedantic)
 add_executable(phazeride_adc src/adc.cpp)
 target_compile_options(phazeride_adc PRIVATE -O2 -Wall -Wextra -Wno-pedantic)
 
+add_executable(parametron_phys src/parametron_phys.cpp)
+target_compile_options(parametron_phys PRIVATE -O2 -Wall -Wextra -Wpedantic)
+
+add_executable(parametron_phys_adder src/parametron_phys_adder.cpp)
+target_compile_options(parametron_phys_adder PRIVATE -O2 -Wall -Wextra -Wpedantic)
+target_include_directories(parametron_phys_adder PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_library(circuit_phys src/circuit_phys.cpp)
+target_compile_options(circuit_phys PRIVATE -O2 -Wall -Wextra -Wpedantic)
+target_include_directories(circuit_phys PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 add_library(circuit_tick src/circuit_tick.cpp)
 target_compile_options(circuit_tick PRIVATE -O2 -Wall -Wextra -Wpedantic)
 target_include_directories(circuit_tick PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)

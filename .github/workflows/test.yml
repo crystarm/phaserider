@@ -13,17 +13,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect project directory
+        run: |
+          if [ -f "phaserider/CMakeLists.txt" ]; then
+            echo "PROJECT_DIR=phaserider" >> $GITHUB_ENV
+          else
+            echo "PROJECT_DIR=." >> $GITHUB_ENV
+          fi
+
       - name: Configure
         run: cmake -S . -B build
+        working-directory: ${{ env.PROJECT_DIR }}
 
       - name: Build
         run: cmake --build build -j
+        working-directory: ${{ env.PROJECT_DIR }}
 
       - name: Make test script executable
         run: chmod +x ./test.sh
+        working-directory: ${{ env.PROJECT_DIR }}
 
       - name: Make CLI script executable
         run: chmod +x ./cli.sh
+        working-directory: ${{ env.PROJECT_DIR }}
 
       - name: Run tests
         run: time ./test.sh --skip-exhaustive --rand 1000
+        working-directory: ${{ env.PROJECT_DIR }}
